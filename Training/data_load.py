@@ -10,7 +10,7 @@ from   skimage import io, transform
 class GazeDataset( Dataset ):
 
     def __init__( self, base_dir, transform=None ):
-        self._base_dir    = "./Data"
+        self._base_dir    = base_dir
         self._sub_dirs    = os.listdir( self._base_dir )
         self._n_images    = 0
         self._sd_n_images = []
