@@ -25,8 +25,8 @@ class GazeDataset( Dataset ):
 
 
     def __len__( self ):
-        #return self._n_images
-        return 30*16;
+        return self._n_images
+        #return 30*16;
 
 
     def __getitem__( self, idx ):
