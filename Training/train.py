@@ -1,4 +1,7 @@
+import os
 import time
+import shutil
+import datetime
 # Ignore warnings
 import warnings
 warnings.filterwarnings( "ignore" )
@@ -23,7 +26,7 @@ print( "done" )
 print( "Preparing dataloader" )
 batch_size  = 4
 #batch_size  = 1
-data_loader = DataLoader( gaze_dataset, batch_size=batch_size, shuffle=True, num_workers=3 )
+data_loader = DataLoader( gaze_dataset, batch_size=batch_size, shuffle=True, num_workers=2 )
 print( "done" )
 
 print( "Loading net" )
@@ -33,6 +36,11 @@ device = torch.device( "cuda:0" if torch.cuda.is_available() else "cpu" )
 net.to( device )
 print( "done" )
 print( device )
+
+results_dir_name = 'Results/' + datetime.datetime.now().strftime( "%Y_%m_%d-%H_%M_%S/" )
+with open( 'continue.txt', 'w' ) as f :
+    f.write( "1" )
+f.close()
 
 print( 'begin training' )
 criterion            = nn.MSELoss()
@@ -58,7 +66,8 @@ while True:
 
         # forward, backward, update
         outputs = net( images )
-        if i*batch_size < 4 :
+        if ( i*batch_size < 4 ) or ( 0 == i*batch_size % 10000 ) :
+           print( '--- ', i*batch_size, '\n');
            print( 'target:\n', coords );
            print( 'output:\n', outputs );
         batch_loss = criterion( outputs, coords )
@@ -78,27 +87,34 @@ while True:
         save = True
 
     e = epoch - 1
-    if ( epoch >= 3 ) and ( losses[e] > 0.99*losses[ e-1 ] ) and ( losses[e] > 0.99*losses[ e-2 ] ) :
-        exp -= 1 if epoch > last_lr_change_epoch + 1 else 2
+    if ( epoch >= 3 ) and ( losses[e] > 0.99*losses[e-1] ) and ( losses[e] > 0.97*losses[e-2] ) :
+        exp -= 1 if ( epoch > last_lr_change_epoch + 2 ) else 2
         last_lr_change_epoch = epoch
-        optimizer = optim.Adam( net.parameters(), lr=pow(2.0,exp) )
+        optimizer = optim.Adam( net.parameters(), lr=pow(2.0,exp) ) # XXX Sadly we loose momentum :(
         print( 'learning rate => 2^', exp )
 
     if ( exp <= -30 ) or ( loss < 0.0001 ):
         stop = True
         save = True
 
-    # TODO read a specific file to check if loop should be broken
+    with open( 'continue.txt', 'r' ) as f :
+    # XXX ^ Not robust to simultaneous read/write, those shoud be exceptional though
+        l    = f.readline();
+        stop = True if ( "1" != l ) else stop
+        save = True
+    f.close()
 
     if save:
         # TODO
         #   . https://pytorch.org/docs/stable/notes/serialization.html
-        #   . better path ( with a timestamped directory )
         #   . save optimizer state ?
         #     -> https://discuss.pytorch.org/t/saving-and-loading-a-model-in-pytorch/2610/3
+        if 0 == last_save_epoch :
+            os.makedirs( name=results_dir_name, mode=0o775, exist_ok=True )
+            shutil.copy( "gaze_net.py", results_dir_name );
         last_save_loss  = loss
         last_save_epoch = epoch
-        torch.save( net, 'gn_320x240_mse'+str(loss)+'_epoch'+str(epoch)+'.pt' )
+        torch.save( net, results_dir_name + 'gn_320x240_mse'+str(loss)+'_epoch'+str(epoch)+'.pt' )
         print( 'save net' )
 
     if stop:
