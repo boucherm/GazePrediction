@@ -1,3 +1,4 @@
+import sys
 import os
 import time
 import shutil
@@ -14,13 +15,28 @@ import data_load as dl
 import gaze_net  as gn
 
 
+
+# Update the learning rate of an optimizer
+def update_lr( optimizer, lr ) :
+    #print( optimizer.state_dict()['param_groups'] )
+    #print( optimizer.state_dict()['param_groups'][0]['lr'] )
+    optimizer_state =  optimizer.state_dict()
+    optimizer_state['param_groups'][0]['lr'] = lr
+    optimizer.load_state_dict( optimizer_state )
+    #optimizer.state_dict()['param_groups'][0]['lr'] = 2
+    #print( optimizer.state_dict()['param_groups'][0]['lr'] )
+    #print( optimizer.state_dict()['param_groups'] )
+
+
 print( "Preparing dataset" )
+data_channels = dl.DataChannels.One
+#data_channels = dl.DataChannels.All
 gaze_dataset = dl.GazeDataset( "../Data",
+                               data_channels,
                                transform=transforms.Compose( [
-                               dl.ScaleImage( (320,240) ),
-                               dl.NormalizeCoordinates( (1920,1080) ),
-                               dl.ToTensor()#,
-                            ] ) )
+                                   dl.ScaleImage( (320,240) ),
+                                   dl.NormalizeCoordinates( (1920,1080) ),
+                                   dl.ToTensor() ] ) )
 print( "done" )
 
 print( "Preparing dataloader" )
@@ -30,7 +46,7 @@ data_loader = DataLoader( gaze_dataset, batch_size=batch_size, shuffle=True, num
 print( "done" )
 
 print( "Loading net" )
-net    = gn.GazeNet320x240()
+net = gn.GazeNet320x240() if ( dl.DataChannels.One == data_channels ) else gn.GazeNet320x240x5()
 #net    = torch.load( 'gn.pt' )
 device = torch.device( "cuda:0" if torch.cuda.is_available() else "cpu" )
 net.to( device )
@@ -44,15 +60,23 @@ f.close()
 
 print( 'begin training' )
 criterion            = nn.MSELoss()
-exp                  = -10
+init_exp             = -10 # TODO: a first pass to search for a good value of init_exp
+exp                  = init_exp
 optimizer            = optim.Adam( net.parameters(), lr = pow(2.0,exp) )
 start_time           = time.time()
 losses               = []
-last_save_loss       = 0
+best_loss            = sys.float_info.max
 last_save_epoch      = 0
 last_lr_change_epoch = 0
 epoch                = 0
+n_cycles             = 3
+cycle                = 1
+epoch_new_cycle      = 0
+# TODO add a counter and a threshold to increase the learning rate ?
 while True:
+    # TODO Alternative ( fastai )
+    #    . multiple cycles, with a cycle corresponding to 1, k, k^2, ... epoch(s)
+    #    . Decrease lr at each mini-batch, following a cosine decrease along the cycle )
     print( '-----------------------------------------------------' )
     epoch += 1
     loss   = 0.0
@@ -78,32 +102,58 @@ while True:
         loss = ( i*loss + batch_loss.item() ) / ( i + 1 )
 
     losses.append( loss )
-    print( '[%d] loss: %.6f' % ( epoch, loss ), 'learning rate: 2^', exp )
+    print( '-------------------' )
+    print( '[%d] | loss: %.6f | lr: 2^%d | cycle: %d' % ( epoch, loss , exp, cycle ) )
 
     stop = False
     save = False
 
-    if ( 1 == epoch ) or ( loss < last_save_loss / 2.0 ) or ( epoch >= last_save_epoch + 5 ):
-        save = True
+    # Save is best loss so far
+    if ( loss < best_loss ):
+        save      = True
+        best_loss = loss
 
+    # Save if it hasn't been in a while
+    #if ( epoch >= last_save_epoch + 5 ) :
+        #save = True
+
+    # Check if lr reduction is needed, perform it if so
     e = epoch - 1
-    if ( epoch >= 3 ) and ( losses[e] > 0.99*losses[e-1] ) and ( losses[e] > 0.97*losses[e-2] ) :
-        exp -= 1 if ( epoch > last_lr_change_epoch + 2 ) else 2
-        last_lr_change_epoch = epoch
-        optimizer = optim.Adam( net.parameters(), lr=pow(2.0,exp) ) # XXX Sadly we loose momentum :(
-        print( 'learning rate => 2^', exp )
+    if ( ( epoch - epoch_new_cycle ) >= 2 ) :
+        delta_lr_change = ( epoch - last_lr_change_epoch )
+        do_update_lr = ( ( losses[e] > 0.99*losses[e-1] ) )
+                      #or ( ( delta_lr_change > 2 ) and ( losses[e] > 0.97*losses[e-2] ) ) )
+        if do_update_lr :
+            #print( losses[ e-2 ] )
+            #print( losses[ e-1 ] )
+            #print( losses[e] )
+            #print( losses[e] > 0.99*losses[e-1] )
+            #print( ( delta_lr_change > 2 ) and ( losses[e] > 0.97*losses[e-2] ) )
+            exp -= 1 if ( delta_lr_change > 2 ) else 2
+            last_lr_change_epoch = epoch
+            update_lr( optimizer, lr=pow(2.0,exp) )
+            print( 'learning rate => 2^', exp )
 
+    # Check if end of a cycle is reached, stop if all cycles performed, restart otherwise
     if ( exp <= -30 ) or ( loss < 0.0001 ):
-        stop = True
-        save = True
+        if cycle == n_cycles :
+            stop = True
+            save = True
+        else :
+            cycle          += 1
+            epoch_new_cycle = 0
+            exp             = init_exp
+            update_lr( optimizer, lr=pow(2.0,exp) )
+            print( 'learning rate => 2^', exp )
 
+    # Read file to check if stop has been requested
     with open( 'continue.txt', 'r' ) as f :
-    # XXX ^ Not robust to simultaneous read/write, those shoud be exceptional though
+        # XXX ^ Not robust to simultaneous read/write, those should be exceptional though
         l    = f.readline();
-        stop = True if ( "1" != l ) else stop
-        save = True
+        stop, save = ( True, True ) if ( "1" != l ) else ( stop, save )
     f.close()
 
+    # Save parameters and neural net file
     if save:
         # TODO
         #   . https://pytorch.org/docs/stable/notes/serialization.html
@@ -112,11 +162,11 @@ while True:
         if 0 == last_save_epoch :
             os.makedirs( name=results_dir_name, mode=0o775, exist_ok=True )
             shutil.copy( "gaze_net.py", results_dir_name );
-        last_save_loss  = loss
         last_save_epoch = epoch
         torch.save( net, results_dir_name + 'gn_320x240_mse'+str(loss)+'_epoch'+str(epoch)+'.pt' )
         print( 'save net' )
 
+    # Stop
     if stop:
         break
 
