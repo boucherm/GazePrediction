@@ -6,6 +6,8 @@ import os.path
 import datetime
 import time
 from   threading import Thread, Lock
+from   abc import ABC, ABCMeta, abstractmethod
+from   enum import Enum
 import numpy as np
 import cv2
 import PyQt5           as pyqt
@@ -31,104 +33,37 @@ faulthandler.enable()
 #       help( PyQt5.QtGui.QImage )
 
 
-class Recorder( Thread ):
 
-    _cap           = cv2.VideoCapture
-    _gray          = np.zeros(1)
-    _n_u_cells     = 10;
-    _n_v_cells     = 10;
-    _u_cell        = 0;
-    _v_cell        = -1;
-    _u             = 0;
-    _v             = 0;
-    _data_dir_name = ""
-    _data_counter  = 0
-    _is_running    = False
-    _exec_lock     = Lock()
-    _is_paused     = True
+class ScannedRegion(Enum):
+    Inner  = 1
+    Border = 2
+
+
+class ScreenScanner(ABC) :
+    __metaclass__ = ABCMeta
+    @abstractmethod
+    def select_coordinates( self ):
+        ...
+
+
+class InnerScanner(ScreenScanner) :
+    _n_u_cells     = 0
+    _n_v_cells     = 0
+    _u_cell        = 0
+    _v_cell        = -1
     _is_going_down = True
-    _n_shots       = 5
+    _screen_width  = 0
+    _screen_height = 0
 
-
-    def __init__( self, screen_width, screen_height, margin, widget ):
-        Thread.__init__( self )
-        self._cap           = cv2.VideoCapture( 0 )
-        ret, frame          = self._cap.read()
-        self._gray          = cv2.cvtColor( frame, cv2.COLOR_BGR2GRAY )
-        self._data_dir_name = '../Data/' + datetime.datetime.now().strftime( "%Y_%m_%d-%H_%M_%S/" )
-        self._screen_width  = screen_width;
-        self._screen_height = screen_height;
-        self._margin        = margin
-        self._u_low         = self._margin
-        self._v_low         = self._margin
-        self._u_high        = self._screen_width  - 1 - self._margin
-        self._v_high        = self._screen_height - 1 - self._margin
-        self._widget        = widget
-
-
-    def __del__( self ):
-        self._cap.release()
-
-
-    def run( self ):
-        time.sleep( 1.0 )
-
-        # Bootstrap display
-        self.select_coordinates()
-        self._widget.set_coordinates( self._u, self._v )
-        self._widget.draw_tile()
-        self._widget.display()
-
-        with self._exec_lock:
-            self._is_running = True
-            self._is_paused  = True
-            is_running       = self._is_running
-            is_paused        = self._is_paused
-
-        #print( '---> before run' )
-        while is_running:
-            #print( '---> running' )
-            if is_paused:
-                #print( '--->   paused' )
-                time.sleep( 0.05 ) # XXX using a condition variable would be better
-            else:
-                #print( '--->   playing' )
-                self._widget.draw_tile()
-                self._widget.display()
-
-                # TODO "wait" for confirmation that display was updated
-
-                # For some reason, I need to "dequeue" the camera
-                for ii in range( 0, 5 ):
-                    ret, frame = self._cap.read()
-
-                for ii in range( 0, self._n_shots ):
-                    time.sleep( 0.035 )
-                    ret, frame = self._cap.read()
-                    self._gray = cv2.cvtColor( frame, cv2.COLOR_BGR2GRAY )
-                    self.save_data()
-
-                self._widget.clear_tile()
-                is_over = self.select_coordinates()
-                if is_over :
-                    #print( "--->   is over " )
-                    self._widget.close()
-                    break
-
-                self._widget.pause()
-                self._widget.set_coordinates( self._u, self._v )
-                self._widget.draw_tile()
-                self._widget.display()
-                self.pause()
-
-            with self._exec_lock:
-                is_running = self._is_running
-                is_paused  = self._is_paused
-        #print( '---> end of run' )
-
+    def __init__( self, screen_width, screen_height, n_cells ) :
+        self._screen_height = screen_height
+        self._screen_width  = screen_width
+        sqrt_n_cells        = int( math.floor( math.sqrt( n_cells ) ) )
+        self._n_u_cells     = sqrt_n_cells
+        self._n_v_cells     = sqrt_n_cells
 
     def select_coordinates( self ):
-        #print( "--- select_coordinates" )
+        #print( "--- select_coordinates_inner" )
         is_over  = False
         if self._is_going_down:
             if ( self._v_cell + 1 ) < self._n_v_cells :
@@ -156,12 +91,155 @@ class Recorder( Thread ):
         u_length = self._screen_width  / self._n_u_cells
         #print( "v_length: ", v_length )
         #print( "u_length: ", u_length )
-        self._v  = v_length*self._v_cell + random.randint( 0, v_length - 1 )
-        self._u  = u_length*self._u_cell + random.randint( 0, u_length - 1 )
-        #print( "self._u: ", self._u )
-        #print( "self._v: ", self._v )
+        v = v_length*self._v_cell + random.randint( 0, v_length - 1 )
+        u = u_length*self._u_cell + random.randint( 0, u_length - 1 )
+        #print( "u: ", u )
+        #print( "v: ", v )
 
-        return is_over
+        return ( is_over, u, v )
+
+
+class BorderScanner(ScreenScanner) :
+    _n_cells_per_side = 0 # per side = > 4*_n_cells will be scanned
+    _cell             = 0
+    _screen_width     = 0
+    _screen_height    = 0
+
+    def __init__( self, screen_width, screen_height, n_cells_per_side ) :
+        self._screen_width     = screen_width
+        self._screen_height    = screen_height
+        self._n_cells_per_side = n_cells_per_side
+
+    def select_coordinates( self ):
+        n = self._n_cells_per_side
+        h = self._screen_height
+        w = self._screen_width
+
+        if ( self._cell < n ) :
+            l = int( math.floor( w / n ) )
+            u = (w-1) - ( self._cell * l + random.randint( 0, l-1 ) )
+            v = 0
+
+        elif ( self._cell < 2*n ) :
+            l = int( math.floor( h / n ) )
+            u = 0
+            v = ( self._cell - n ) * l + random.randint( 0, l-1 )
+
+        elif ( self._cell < 3*n ) :
+            l = int( math.floor( w / n ) )
+            u = ( self._cell - 2*n ) * l + random.randint( 0, l-1 )
+            v = h-1
+
+        else :
+            l = int( math.floor( h / n ) )
+            u = w-1
+            v = (h-1) - ( ( self._cell - 3*n ) * l + random.randint( 0, l-1 ) )
+
+        is_over     = ( self._cell >= 4*self._n_cells_per_side )
+        self._cell += 1
+        #print( "u: ", u )
+        #print( "v: ", v )
+
+        return ( is_over, u, v )
+
+
+
+class Recorder( Thread ):
+
+    _cap           = cv2.VideoCapture
+    _gray          = np.zeros(1)
+    _u             = 0;
+    _v             = 0;
+    _data_dir_name = ""
+    _data_counter  = 0
+    _is_running    = False
+    _exec_lock     = Lock()
+    _is_paused     = True
+    _n_shots       = 5
+    _scanner       = None
+    _region        = None
+
+
+    def __init__( self, screen_width, screen_height, margin, widget ):
+        self._cap           = cv2.VideoCapture( 0 )
+        ret, frame          = self._cap.read()
+        self._gray          = cv2.cvtColor( frame, cv2.COLOR_BGR2GRAY )
+        self._data_dir_name = '../Data/' + datetime.datetime.now().strftime( "%Y_%m_%d-%H_%M_%S/" )
+        self._screen_width  = screen_width;
+        self._screen_height = screen_height;
+        self._margin        = margin
+        self._widget        = widget
+        self._scanner       = InnerScanner( self._screen_width, self._screen_height, 100 )
+        self._region        = ScannedRegion.Inner
+        Thread.__init__( self )
+
+
+    def __del__( self ):
+        self._cap.release()
+
+
+    def run( self ):
+        time.sleep( 1.0 )
+
+        # Bootstrap display
+        _, self._u, self._v = self._scanner.select_coordinates()
+        self._widget.set_coordinates( self._u, self._v )
+        self._widget.draw_tile()
+        self._widget.display()
+
+        with self._exec_lock:
+            self._is_running = True
+            self._is_paused  = True
+            is_running       = self._is_running
+            is_paused        = self._is_paused
+
+        #print( '---> before run' )
+        while is_running:
+            #print( '---> running' )
+            if is_paused:
+                #print( '--->   paused' )
+                time.sleep( 0.05 ) # XXX using a condition variable would be better
+            else:
+                #print( '--->   playing' )
+                self._widget.draw_tile()
+                self._widget.display()
+
+                # TODO "wait" for confirmation that display was updated
+
+                # "dequeue" the camera ( for some reason, I need to )
+                for ii in range( 0, 5 ):
+                    ret, frame = self._cap.read()
+
+                # Acquire and several images
+                for ii in range( 0, self._n_shots ):
+                    time.sleep( 0.035 )
+                    ret, frame = self._cap.read()
+                    self._gray = cv2.cvtColor( frame, cv2.COLOR_BGR2GRAY )
+                    self.save_data()
+
+                self._widget.clear_tile()
+                is_over, self._u, self._v = self._scanner.select_coordinates()
+
+                if is_over :
+                    if ( ScannedRegion.Inner == self._region ) :
+                        self._scanner = BorderScanner( self._screen_width, self._screen_height, 10 )
+                        self._region  = ScannedRegion.Border
+                        _, self._u, self._v = self._scanner.select_coordinates()
+                    else :
+                        #print( "--->   is over " )
+                        self._widget.close()
+                        break
+
+                self._widget.pause()
+                self._widget.set_coordinates( self._u, self._v )
+                self._widget.draw_tile()
+                self._widget.display()
+                self.pause()
+
+            with self._exec_lock:
+                is_running = self._is_running
+                is_paused  = self._is_paused
+        #print( '---> end of run' )
 
 
     def save_data( self ):
@@ -171,7 +249,7 @@ class Recorder( Thread ):
             u = self._u
             v = self._v
             f.write( str( self._data_counter ) + '; ' + str( u ) + '; ' + str( v ) + '\n' )
-        f.closed
+        f.close()
         cv2.imwrite( self._data_dir_name + '/' + str( self._data_counter ) + '.png', self._gray )
 
 
@@ -197,7 +275,7 @@ class Recorder( Thread ):
 class Widget( QWidget, Thread ):
 
     _image         = QImage
-    _recorder      = Recorder
+    _recorder      = None
     _label         = QLabel
     _tile_size     = 31;
     _screen_width  = 1920;
@@ -265,7 +343,10 @@ class Widget( QWidget, Thread ):
                                  self._tile_size ),
                           QBrush( color ) )
         painter.fillRect( QRect( u - 5 , v - 5 , 10 , 10 ) , QBrush( Qt.black ) )
-        painter.fillRect( QRect( u     , v     , 1  , 1 )  , QBrush( QColor(0,100,255) ) )
+        if recording :
+            painter.fillRect( QRect( u     , v     , 1  , 1 )  , QBrush( QColor(0,255,140) ) )
+        else :
+            painter.fillRect( QRect( u     , v     , 1  , 1 )  , QBrush( QColor(0,140,255) ) )
 
 
     def display( self ):
