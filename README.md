@@ -26,7 +26,7 @@ A blue pixel surrounded by a grey square is displayed ( for each new position ).
 While looking at the blue pixel, press `space` to acquire some images ( meanwhile the grey square is removed ).
 Once a point data has been gathered a new point is selected and displayed.
 Points are first sampled on a 10x10 grid, then on 40 locations along the screen border.
-Once the 10x10 grid has been scanned the program stops.
+Once all locations have been scanned the program stops.
 Press `q` or `escape` to stop early, but a complete run shouldn't be too long.
 
 To provide some robustness to sensor noise and blinking, five images are taken for each sampled point.
