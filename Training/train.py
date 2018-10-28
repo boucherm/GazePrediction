@@ -46,8 +46,8 @@ data_loader = DataLoader( gaze_dataset, batch_size=batch_size, shuffle=True, num
 print( "done" )
 
 print( "Loading net" )
-net = gn.GazeNet320x240() if ( dl.DataChannels.One == data_channels ) else gn.GazeNet320x240x5()
-#net    = torch.load( 'gn.pt' )
+#net = gn.GazeNet320x240() if ( dl.DataChannels.One == data_channels ) else gn.GazeNet320x240x5()
+net    = torch.load( 'gn.pt' )
 device = torch.device( "cuda:0" if torch.cuda.is_available() else "cpu" )
 net.to( device )
 print( "done" )
@@ -79,39 +79,59 @@ while True:
     #    . Decrease lr at each mini-batch, following a cosine decrease along the cycle )
     print( '-----------------------------------------------------' )
     epoch += 1
-    loss   = 0.0
-    for i, data in enumerate( data_loader, 0 ):
-        images = data[ "image" ].float()
-        coords = torch.squeeze( data[ "coords" ].float(), dim=1 )
-        images, coords = images.to( device ), coords.to( device )
+    train_loss = 0.0
+    dev_loss   = 0.0
+    test_loss  = 0.0
+    for _, process in enumerate( dl.Process ):
+        print( process )
+        gaze_dataset.setProcess( process )
 
-        # zero the parameter's gradients
-        optimizer.zero_grad()
+        if ( dl.Process.Train == process ) :
+            net = net.train()
+        else :
+            net = net.eval()
 
-        # forward, backward, update
-        outputs = net( images )
-        if ( i*batch_size < 4 ) or ( 0 == i*batch_size % 10000 ) :
-           print( '--- ', i*batch_size, '\n');
-           print( 'target:\n', coords );
-           print( 'output:\n', outputs );
-        batch_loss = criterion( outputs, coords )
-        batch_loss.backward()
-        optimizer.step()
+        loss = 0.0
+        for i, data in enumerate( data_loader, 0 ):
+            #print( i, end=' ' )
+            #continue
+            images         = data[ "image" ].float()
+            coords         = torch.squeeze( data[ "coords" ].float(), dim=1 )
+            images, coords = images.to( device ), coords.to( device )
 
-        # print statistics
-        loss = ( i*loss + batch_loss.item() ) / ( i + 1 )
+            # zero the parameter's gradients
+            optimizer.zero_grad()
+
+            # forward, backward, update
+            outputs = net( images )
+            if ( i*batch_size < 4 ) or ( 0 == i*batch_size % 10000 ) :
+               print( '--- ', i*batch_size, '\n');
+               print( 'target:\n', coords );
+               print( 'output:\n', outputs );
+
+            batch_loss = criterion( outputs, coords )
+            if ( dl.Process.Train == process ):
+                batch_loss.backward()
+                optimizer.step()
+
+            loss = ( i*loss + batch_loss.item() ) / ( i + 1 )
+
+        if ( dl.Process.Train == process ) : train_loss = loss
+        if ( dl.Process.Dev   == process ) : dev_loss   = loss
+        if ( dl.Process.Test  == process ) : test_loss  = loss
 
     losses.append( loss )
     print( '-------------------' )
-    print( '[%d] | loss: %.6f | lr: 2^%d | cycle: %d' % ( epoch, loss , exp, cycle ) )
+    print( '[%d] | cycle: %d | lr: 2^%d | train_loss: %.6f | dev_loss: %.6f | test_loss: %.6f | '
+            % ( epoch, cycle, exp, train_loss, dev_loss, test_loss) )
 
     stop = False
     save = False
 
     # Save is best loss so far
-    if ( loss < best_loss ):
+    if ( train_loss < best_loss ):
         save      = True
-        best_loss = loss
+        best_loss = train_loss
 
     # Save if it hasn't been in a while
     #if ( epoch >= last_save_epoch + 5 ) :
@@ -135,7 +155,7 @@ while True:
             print( 'learning rate => 2^', exp )
 
     # Check if end of a cycle is reached, stop if all cycles performed, restart otherwise
-    if ( exp <= -30 ) or ( loss < 0.0001 ):
+    if ( exp <= -30 ) or ( train_loss < 0.0001 ):
         if cycle == n_cycles :
             stop = True
             save = True
@@ -163,7 +183,7 @@ while True:
             os.makedirs( name=results_dir_name, mode=0o775, exist_ok=True )
             shutil.copy( "gaze_net.py", results_dir_name );
         last_save_epoch = epoch
-        torch.save( net, results_dir_name + 'gn_320x240_mse'+str(loss)+'_epoch'+str(epoch)+'.pt' )
+        torch.save( net, results_dir_name + 'gn_320x240_mse'+str(train_loss)+'_epoch'+str(epoch)+'.pt' )
         print( 'save net' )
 
     # Stop
