@@ -4,6 +4,7 @@ import random
 import os.path
 import datetime
 import time
+import configparser
 from   threading import Thread
 import numpy as np
 import cv2
@@ -29,16 +30,20 @@ class Pointer():
     _data_counter = 0
     _run          = False
     _paused       = True
-    _width        = 1920
-    _height       = 1080
+    _width        = 0
+    _height       = 0
 
 
-    def __init__( self ):
-        Thread.__init__( self )
+    def __init__( self, width, height ):
+        self._width  = width
+        self._height = height
         self._cap  = cv2.VideoCapture( 0 )
+        print( 'Loading net..' )
         self._net  = torch.load( 'gn.pt' )
+        print( '...done' )
         self._dev  = torch.device( "cuda:0" if torch.cuda.is_available() else "cpu" )
         self._net.to( self._dev )
+        Thread.__init__( self )
 
 
     def __del__( self ):
@@ -47,10 +52,10 @@ class Pointer():
 
     def run( self ):
         for ii in range( 0, 5 ):
-            ret, frame = self._cap.read()
-        ret, frame = self._cap.read()
-        gray       = cv2.cvtColor( frame, cv2.COLOR_BGR2GRAY )
-        image      = transform.resize( gray, ( 320, 240 ) )
+            _, frame = self._cap.read()
+        _, frame = self._cap.read()
+        gray     = cv2.cvtColor( frame, cv2.COLOR_BGR2GRAY )
+        image    = transform.resize( gray, ( 320, 240 ) )
         image  = image.astype( float )
         image  = np.expand_dims( image, 0 )
         image  = np.expand_dims( image, 0 )
@@ -75,26 +80,24 @@ class Pointer():
 
 class Widget( QWidget ):
 
-    _image         = QImage
-    _pointer       = Pointer
-    _label         = QLabel
-    _tile_size     = 101;
-    _screen_width  = 1920;
-    _screen_height = 1080;
-    _u             = 0;
-    _v             = 0;
+    _image         = None
+    _pointer       = None
+    _label         = None
+    _tile_size     = 101
+    _screen_width  = 0
+    _screen_height = 0
+    _u             = 0
+    _v             = 0
     _margin        = ( _tile_size - 1 ) / 2.0
-    _u_low         = _margin
-    _u_high        = _screen_width  - 1 - _margin
-    _v_low         = _margin
-    _v_high        = _screen_height - 1 - _margin
 
 
-    def __init__( self ):
+    def __init__( self, screen_width, screen_height ):
         super( Widget, self ).__init__()
-        self._image   = QImage( self._screen_width, self._screen_height, QImage.Format_RGB32 )
-        self._pointer = Pointer()
-        self._label   = QLabel
+        self._screen_width  = screen_width
+        self._screen_height = screen_height
+        self._image         = QImage( self._screen_width, self._screen_height, QImage.Format_RGB32 )
+        self._pointer       = Pointer( screen_width, screen_height )
+        self._label         = QLabel
 
 
     #def __del__( self ):
@@ -124,6 +127,7 @@ class Widget( QWidget ):
             self.set_coordinates( coords[0], coords[1] )
             self.draw_tile()
             self.display()
+
 
     def set_coordinates( self, u, v ):
         self._u = u
@@ -168,10 +172,15 @@ class Widget( QWidget ):
 
 
 if __name__ == '__main__':
+    config = configparser.ConfigParser()
+    config.read( '../config.txt' )
+    width  = int( config['SCREEN']['width'] )
+    height = int( config['SCREEN']['height'] )
+
     app   = QApplication( sys.argv )
-    w     = Widget()
+    w     = Widget( width, height )
     label = QLabel( w )
-    image = QImage( 1920, 1080, QImage.Format_RGB32 )
+    image = QImage( width, height, QImage.Format_RGB32 )
     label.setPixmap( QPixmap.fromImage( image ) )
     w.set_label( label )
     w.start()

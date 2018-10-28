@@ -3,6 +3,7 @@ import os
 import time
 import shutil
 import datetime
+import configparser
 # Ignore warnings
 import warnings
 warnings.filterwarnings( "ignore" )
@@ -28,6 +29,12 @@ def update_lr( optimizer, lr ) :
     #print( optimizer.state_dict()['param_groups'] )
 
 
+
+config = configparser.ConfigParser()
+config.read( '../config.txt' )
+screen_width  = int( config['SCREEN']['width'] )
+screen_height = int( config['SCREEN']['height'] )
+
 print( "Preparing dataset" )
 data_channels = dl.DataChannels.One
 #data_channels = dl.DataChannels.All
@@ -35,7 +42,7 @@ gaze_dataset = dl.GazeDataset( "../Data",
                                data_channels,
                                transform=transforms.Compose( [
                                    dl.ScaleImage( (320,240) ),
-                                   dl.NormalizeCoordinates( (1920,1080) ),
+                                   dl.NormalizeCoordinates( (screen_width,screen_height) ),
                                    dl.ToTensor() ] ) )
 print( "done" )
 

@@ -5,6 +5,7 @@ import random
 import os.path
 import datetime
 import time
+import configparser
 from   threading import Thread, Lock
 from   abc import ABC, ABCMeta, abstractmethod
 from   enum import Enum
@@ -278,8 +279,8 @@ class Widget( QWidget, Thread ):
     _recorder      = None
     _label         = QLabel
     _tile_size     = 31;
-    _screen_width  = 1920;
-    _screen_height = 1080;
+    _screen_width  = 0;
+    _screen_height = 0;
     _u             = 0;
     _v             = 0;
     _is_recording  = False;
@@ -288,11 +289,13 @@ class Widget( QWidget, Thread ):
     _coords_lock   = Lock()
 
 
-    def __init__( self ):
+    def __init__( self, screen_width, screen_height ):
         super( Widget, self ).__init__()
-        self._image    = QImage( self._screen_width, self._screen_height, QImage.Format_RGB32 )
-        self._label    = QLabel
-        self._recorder = Recorder( self._screen_width, self._screen_height, self._margin, self )
+        self._screen_width  = screen_width
+        self._screen_height = screen_height
+        self._image         = QImage( self._screen_width, self._screen_height, QImage.Format_RGB32 )
+        self._label         = QLabel
+        self._recorder      = Recorder( self._screen_width, self._screen_height, self._margin, self )
         self._recorder.start()
 
 
@@ -342,11 +345,11 @@ class Widget( QWidget, Thread ):
                                  self._tile_size,
                                  self._tile_size ),
                           QBrush( color ) )
-        painter.fillRect( QRect( u - 5 , v - 5 , 10 , 10 ) , QBrush( Qt.black ) )
+        painter.fillRect( QRect( u-5, v-5, 10, 10 ) , QBrush( Qt.black ) )
         if recording :
-            painter.fillRect( QRect( u     , v     , 1  , 1 )  , QBrush( QColor(0,255,140) ) )
+            painter.fillRect( QRect( u, v, 1, 1 )  , QBrush( QColor(0,255,140) ) )
         else :
-            painter.fillRect( QRect( u     , v     , 1  , 1 )  , QBrush( QColor(0,140,255) ) )
+            painter.fillRect( QRect( u, v, 1, 1 )  , QBrush( QColor(0,140,255) ) )
 
 
     def display( self ):
@@ -367,10 +370,14 @@ class Widget( QWidget, Thread ):
 
 
 if __name__ == '__main__':
-    app   = QApplication( sys.argv )
-    w     = Widget()
-    label = QLabel( w )
-    image = QImage( 1920, 1080, QImage.Format_RGB32 )
+    config = configparser.ConfigParser()
+    config.read( '../config.txt' )
+    width  = int( config['SCREEN']['width'] )
+    height = int( config['SCREEN']['height'] )
+    app    = QApplication( sys.argv )
+    w      = Widget( width, height )
+    label  = QLabel( w )
+    image  = QImage( width, height, QImage.Format_RGB32 )
     label.setPixmap( QPixmap.fromImage( image ) )
     w.setLabel( label )
     #w.start()

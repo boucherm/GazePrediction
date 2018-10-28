@@ -3,9 +3,17 @@ This is ( not ) achieved ( but not that far ) using a ( rather simple ) neural n
 As a neural net needs to be trained, training data is needed.
 This project presents three python scripts: one to acquire data, one to define and train a neural net, one to test the results.
 
+
 Required hardware: a webcam rigidly fixed to the screen\
 Required software: python3, opencv python packages, pyqt5, scikit-image, pytorch, numpy
 
+
+Configuration
+=============
+
+File: `config.txt`
+
+Fill in your screen's width and height values.
 
 
 Acquisition
@@ -33,8 +41,6 @@ Quirk: the net is prone to learn to only use the head orientation ( thus ignorin
 To counter this, it is effective to perform some acquisition runs where the head stays still and only the eyes move to look at the pixel/cursor.
 
 Adjustment to your situation:
-The screen size is hardcoded as 1920x1080.
-Therefore, if your screen has a different size you should look for the `1920` and `1080` values and replace with your screen resolution values.
 If you have more than one webcam connected to your computer you may need to change the camera index ( default value: `0` ) in the `cv2.VideoCapture(0)` call.
 
 
@@ -54,10 +60,6 @@ In these names `mse0.XXXX` is the mean squared error for the net on the training
 Quirks: depending on the number of training data you have, you may need or benefit from tinkering with the `batch_size` and `exp` variables.
 If these values are too big the net won't learn.
 If they are too small the net will be slow to learn.
-
-Adjustment to your situation:
-As for the acquisition script the screen resolution is hardcoded.
-Look for the `1920` and `1080` values and replace accordingly.
 
 Warning: expect the architecture to change.
 Therefore, would you be satisfied with a training results, you should save the net architecture file.
@@ -81,5 +83,4 @@ Press `q` or `escape` to quit.
 Warning: it takes quite a long time to start.
 
 Adjustment to your situation:
-As for the others scripts the screen resolution is hardcoded.
-Look for the `1920` and `1080` values and replace accordingly.
+If you have more than one webcam connected to your computer you may need to change the camera index ( default value: `0` ) in the `cv2.VideoCapture(0)` call.
