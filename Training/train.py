@@ -46,8 +46,8 @@ data_loader = DataLoader( gaze_dataset, batch_size=batch_size, shuffle=True, num
 print( "done" )
 
 print( "Loading net" )
-#net = gn.GazeNet320x240() if ( dl.DataChannels.One == data_channels ) else gn.GazeNet320x240x5()
-net    = torch.load( 'gn.pt' )
+net = gn.GazeNet320x240() if ( dl.DataChannels.One == data_channels ) else gn.GazeNet320x240x5()
+#net    = torch.load( 'gn.pt' )
 device = torch.device( "cuda:0" if torch.cuda.is_available() else "cpu" )
 net.to( device )
 print( "done" )
