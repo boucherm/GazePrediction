@@ -1,10 +1,11 @@
 import os
 import glob
+from   enum import Enum
+import random
 import numpy as np
 import torch
 from   torch.utils.data import Dataset
 from   skimage import io, transform
-from   enum import Enum
 
 
 
@@ -13,35 +14,61 @@ class DataChannels(Enum):
     All = 2
 
 
+class Process(Enum):
+    Train = 1
+    Dev   = 2
+    Test  = 3
+
+
 
 class GazeDataset( Dataset ):
 
-    def __init__( self, base_dir, channels, transform=None ):
+    def __init__( self, base_dir, channels, transform=None, n_dev=1000, n_test=1000 ):
         self._base_dir    = base_dir
         self._sub_dirs    = os.listdir( self._base_dir )
         self._n_images    = 0
         self._sd_n_images = []
         self._channels    = channels
-
-        for sd in self._sub_dirs:
-            images_glob     = base_dir + "/" + sd + "/*.png"
-            images_names    = glob.glob( images_glob )
-            self._n_images += len( images_names )
-            self._sd_n_images.append( len( images_names ) )
+        self._all_indexes = []
+        self._n_train     = 0
+        self._n_dev       = 0
+        self._n_test      = 0
+        self._process     = Process.Train
 
         self.transform = transform
 
+        n_images = 0
+        for sd in self._sub_dirs:
+            images_glob   = base_dir + "/" + sd + "/*.png"
+            images_names  = glob.glob( images_glob )
+            n_images     += len( images_names )
+            self._sd_n_images.append( len( images_names ) )
+        self._n_images = n_images if ( DataChannels.One == self._channels ) else int( n_images/5 )
+
+        self._all_indexes = list( range( 0, self._n_images ) )
+        random.shuffle( self._all_indexes )
+
+        if ( self._n_images > ( n_dev + n_test ) ) :
+            self._n_train = self._n_images - ( n_dev + n_test )
+            self._n_dev   = n_dev
+            self._n_test  = n_test
+
 
     def __len__( self ):
-        return self._n_images if ( DataChannels.One == self._channels ) else int( self._n_images/5 )
-        #return 30*16;
-        #return 100;
+        n = 0
+        if ( Process.Train == self._process ) : n = self._n_train
+        if ( Process.Dev   == self._process ) : n = self._n_dev
+        if ( Process.Test  == self._process ) : n = self._n_test
+        return n
 
 
     def __getitem__( self, idx ):
         # Note:
         #    The whole thing could be way more efficient
         #    I'm just not focusing on that at the moment
+        if ( Process.Dev   == self._process ) : idx += self._n_train
+        if ( Process.Test  == self._process ) : idx += self._n_train + self._n_dev
+        idx = self._all_indexes[ idx ]
         sd_index = 0
         counter  = 0
         raw_id   = idx if ( DataChannels.One == self._channels ) else int( idx*5 )
@@ -82,6 +109,10 @@ class GazeDataset( Dataset ):
             item = self.transform( item )
 
         return item
+
+
+    def setProcess( self, process ):
+        self._process = process
 
 
 
