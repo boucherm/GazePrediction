@@ -62,7 +62,12 @@ If these values are too big the net won't learn.
 If they are too small the net will be slow to learn.
 
 Warning: expect the architecture to change.
-Therefore, would you be satisfied with a training results, you should save the net architecture file.
+
+Notes:
+* While training you will see losses for train, dev and test sets ( names from Andrew Ng ).
+Dev and test sets are picked randomly ( with a constant seed ) among the data folder.
+If the dataset doesn't change, from one training to another, the dev and test sets don't change either.
+* The reason for the neural being quite simple ( in terms of number of parameters ) is that a big one takes lot of time ( I have a modest gpu ) and data ( acquisition takes time too ) to train.
 
 
 Testing
