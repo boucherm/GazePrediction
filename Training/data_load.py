@@ -46,6 +46,7 @@ class GazeDataset( Dataset ):
         self._n_images = n_images if ( DataChannels.One == self._channels ) else int( n_images/5 )
 
         self._all_indexes = list( range( 0, self._n_images ) )
+        random.seed( 0 )
         random.shuffle( self._all_indexes )
 
         if ( self._n_images > ( n_dev + n_test ) ) :
@@ -57,6 +58,7 @@ class GazeDataset( Dataset ):
     def __len__( self ):
         n = 0
         if ( Process.Train == self._process ) : n = self._n_train
+        #if ( Process.Train == self._process ) : n = 1000
         if ( Process.Dev   == self._process ) : n = self._n_dev
         if ( Process.Test  == self._process ) : n = self._n_test
         return n
