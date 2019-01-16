@@ -1,9 +1,7 @@
 import sys
-import os
 import time
-import shutil
-import datetime
 import configparser
+import math
 # Ignore warnings
 import warnings
 warnings.filterwarnings( "ignore" )
@@ -14,10 +12,15 @@ import torch.nn as nn
 import torch.optim as optim
 import data_load as dl
 import gaze_net  as gn
+import io_utils  as iu
 
 
+
+# Visualization tool
+#https://www.wandb.com/blog/monitor-your-pytorch-models-with-five-extra-lines-of-code
 
 # Update the learning rate of an optimizer
+# TODO put in a train_utils module
 def update_lr( optimizer, lr ) :
     #print( optimizer.state_dict()['param_groups'] )
     #print( optimizer.state_dict()['param_groups'][0]['lr'] )
@@ -29,61 +32,84 @@ def update_lr( optimizer, lr ) :
     #print( optimizer.state_dict()['param_groups'] )
 
 
-def tee( string, filename ) :
-    print( string )
-    with open( filename, 'a' ) as f:
-        f.write( string )
-        f.write( '\n' )
-
 
 
 # Hyper-parameters
-init_exp   = -10 # TODO: a first pass to search for a good value of init_exp
-n_cycles   = 3
-batch_size = 32
-#batch_size = 16
-#batch_size = 1
+init_exp = -8 # TODO: a first pass to search for a good value of init_exp
+n_cycles = 9
+w        = 320*2
+h        = 240*2
+N        = 8 # batch_size, beware, for '1' batch_norm will fail and raise an exceptijn
+
+results_dir_name = iu.setup_io()
 
 config = configparser.ConfigParser()
 config.read( '../config.txt' )
-screen_width  = int( config['SCREEN']['width'] )
-screen_height = int( config['SCREEN']['height'] )
+screen_w = int( config['SCREEN']['width'] )
+screen_h = int( config['SCREEN']['height'] )
+# TODO the same for the desired processed dimensions ?
 
-print( "Preparing dataset" )
-data_channels = dl.DataChannels.One
+# Setting fixed seed, for debug purposes
+#torch.manual_seed(0)
+# Alternative way to set workers' seeds, pass the following fn as worker_init_fn
+#def _init_fn(worker_id):
+#    np.random.seed(12 + worker_id)
+
+iu.tee( "Preparing dataset" )
+#data_channels = dl.DataChannels.One
 #data_channels = dl.DataChannels.All
 gaze_dataset = dl.GazeDataset( "../Data",
-                               data_channels,
+                               target_res=(w,h),
                                transform=transforms.Compose( [
-                                   dl.ScaleImage( (320,240) ),
-                                   dl.NormalizeCoordinates( (screen_width,screen_height) ),
+                                   dl.ScaleImage( (w,h) ),
+                                   dl.NormalizeCoordinates( (screen_w,screen_h) ),
+                                   dl.CenterPixels(),
                                    dl.ToTensor() ] ) )
-print( "done" )
+iu.tee( "done" )
 
-print( "Preparing dataloader" )
-data_loader = DataLoader( gaze_dataset, batch_size=batch_size, shuffle=True, num_workers=2 )
-print( "done" )
+iu.tee( "Preparing dataloader" )
+data_loader = DataLoader( gaze_dataset, batch_size=N, shuffle=True, num_workers=3, drop_last=True )
+iu.tee( "done" )
 
-print( "Loading net" )
-net = gn.GazeNet320x240() if ( dl.DataChannels.One == data_channels ) else gn.GazeNet320x240x5()
-#net    = torch.load( 'gn_old.pt' )
+iu.tee( "Loading net" )
+#net = gn.GazeNet320x240_Strided()
+net = gn.GazeNetProgressive( w, h,
+                             [ gn.CP(7,2,64),
+                               gn.CP(7,2,16),
+                               gn.CP(7,2,16),
+                               gn.CP(5,2,16),
+                               gn.CP(5,1,16),
+                               gn.CP(5,1,16) ],
+                             [ gn.FCP( gn.AOR.Abs, 512 ),
+                               gn.FCP( gn.AOR.Abs, 256 ),
+                               gn.FCP( gn.AOR.Abs, 256 ),
+                               gn.FCP( gn.AOR.Abs, 256 ),
+                               gn.FCP( gn.AOR.Abs, 2 ) ],
+                             #True, N
+                             False, N
+                           )
+#print( net )
+#net = torch.load ('Results/2018_12_18-00_56_43/gn_320x240_mse0.17132242421309155_epoch95.pt' )
 device = torch.device( "cuda:0" if torch.cuda.is_available() else "cpu" )
+#device = "cpu"
 net.to( device )
-print( "done" )
-print( device )
+iu.tee( "done" )
+iu.tee( "device: " + str(device) )
 
-results_dir_name = 'Results/' + datetime.datetime.now().strftime( "%Y_%m_%d-%H_%M_%S/" )
-os.makedirs( name=results_dir_name, mode=0o775, exist_ok=True )
-shutil.copy( "gaze_net.py", results_dir_name );
-logfilename = results_dir_name + '/log.txt'
 with open( 'continue.txt', 'w' ) as f :
     f.write( "1" )
 f.close()
 
-print( 'begin training' )
-criterion            = nn.MSELoss()
-exp                  = init_exp
-optimizer            = optim.Adam( net.parameters(), lr = pow(2,exp) )
+iu.tee( 'begin training' )
+criterion = nn.MSELoss()
+#criterion = nn.L1Loss()
+exp       = init_exp
+optimizer = optim.Adam( net.parameters(), lr = pow(2,exp) )
+
+#import IPython
+#IPython.core.debugger.set_trace()
+#sys.exit( 0 )
+
 # Attempt at searching a value for initial learning rate ( exp )
 # Didn't give interesting results, maybe just needs to be reworked
 # ( ex: making stats on a whole epoch / on more than a single batch )
@@ -126,25 +152,28 @@ optimizer            = optim.Adam( net.parameters(), lr = pow(2,exp) )
 #exp                  = init_exp
 start_time           = time.time()
 losses               = []
-best_loss            = sys.float_info.max
+best_train_loss      = sys.float_info.max
+best_dev_loss        = sys.float_info.max
 last_save_epoch      = 0
+last_dropout_epoch   = -1
 last_lr_change_epoch = 0
 epoch                = 0
 cycle                = 1
 epoch_new_cycle      = 0
+frozen_convs         = False
 # TODO add a counter and a threshold to increase the learning rate ?
 while True:
-    # TODO Alternative ( fastai )
+    # Alternatives ( fastai )
     #    . multiple cycles, with a cycle corresponding to 1, k, k^2, ... epoch(s)
     #    . Decrease lr at each mini-batch, following a cosine decrease along the cycle )
-    tee( '-----------------------------------------------------', logfilename )
-    epoch += 1
+    iu.tee( '-----------------------------------------------------' )
+    epoch     += 1
     train_loss = 0.0
     dev_loss   = 0.0
     test_loss  = 0.0
 
     for _, process in enumerate( dl.Process ):
-        tee( str(process), logfilename )
+        iu.tee( str(process) )
         gaze_dataset.setProcess( process )
 
         if ( dl.Process.Train == process ) :
@@ -153,6 +182,7 @@ while True:
             net = net.eval()
 
         loss = 0.0
+        start = time.time()
         for i, data in enumerate( data_loader, 0 ):
             images         = data[ "image" ].float()
             coords         = torch.squeeze( data[ "coords" ].float(), dim=1 )
@@ -161,90 +191,122 @@ while True:
             # zero the parameter's gradients
             optimizer.zero_grad()
 
-            # forward, backward, update
+            # forward
             outputs = net( images )
-            if ( i*batch_size < 4 ) or ( 0 == i*batch_size % 10000 ) :
-               tee( '--- ' + str(i*batch_size) + '\n', logfilename );
-               tee( 'target:\n' + str(coords), logfilename  );
-               tee( 'output:\n' + str(outputs), logfilename  );
+            if ( i == 0 ) or ( i == math.floor( len(gaze_dataset)/(2*N) ) ):
+               print()
+               iu.tee( '--- ' + str(i*N) + '\n' )
+               iu.tee( 'target:\n' + str(coords[0:4,:]) )
+               iu.tee( 'output:\n' + str(outputs[0:4,:]) )
 
+            #if 1000 == i :
+                #end = time.time()
+                #print()
+                #print( end - start )
+                #sys.exit(0)
+
+            # backward & update
             batch_loss = criterion( outputs, coords )
             if ( dl.Process.Train == process ):
                 batch_loss.backward()
                 optimizer.step()
+                #if ( hasattr( net, 'norm_abs' ) ) :
+                    #net.norm_abs()
 
             loss = ( i*loss + batch_loss.item() ) / (i+1)
+            print( process, ' ', i, ' - ', batch_loss.item(), ' - ', loss, ' - ',
+                   math.sqrt(loss/4)*( screen_w+screen_h )/2, end='\r' )
 
+        print()
         if ( dl.Process.Train == process ) : train_loss = loss
         if ( dl.Process.Dev   == process ) : dev_loss   = loss
         if ( dl.Process.Test  == process ) : test_loss  = loss
 
     losses.append( train_loss )
-    tee( '-------------------', logfilename )
-    tee( '[%d] | cycle: %d | lr: 2^%d | train_loss: %.6f | dev_loss: %.6f | test_loss: %.6f | '
-            % ( epoch, cycle, exp, train_loss, dev_loss, test_loss), logfilename )
+    iu.tee( '-------------------' )
+    iu.tee( '[%d] | cycle: %d | lr: 2^%d | train_loss: %.6f | dev_loss: %.6f | test_loss: %.6f | '
+            % ( epoch, cycle, exp, train_loss, dev_loss, test_loss) )
 
     stop = False
     save = False
 
-    # Save is best loss so far
-    if ( dev_loss < best_loss ):
-        save      = True
-        best_loss = dev_loss
+    #--- Save best losses
+    mse_str = ''
+    if ( dev_loss < best_dev_loss ):
+        save          = True
+        best_dev_loss = dev_loss
+        frac, inte    = math.modf( dev_loss )
+        mse_str       = '_dev' + '_mse' + str(int(inte)) + '_' + str( math.floor( 10000*frac ) )
 
-    # Save if it hasn't been in a while
-    #if ( epoch >= last_save_epoch + 5 ) :
-        #save = True
+    if ( train_loss < 0.8*best_train_loss ): # otherwise we'll be saving way too often
+        save            = True
+        best_train_loss = train_loss
+        frac, inte      = math.modf( train_loss )
+        mse_str         = '_train' + '_mse' + str(int(inte)) + '_' + str( math.floor( 10000*frac ) )
 
-    # Check if lr reduction is needed, perform it if so
+    #--- Check if lr reduction is needed, perform if so
     e = epoch - 1
     if ( ( epoch - epoch_new_cycle ) >= 2 ) :
-        delta_lr_change = ( epoch - last_lr_change_epoch )
-        do_update_lr = ( ( losses[e] > 0.99*losses[e-1] ) )
-                      #or ( ( delta_lr_change > 2 ) and ( losses[e] > 0.97*losses[e-2] ) ) )
+        do_update_lr = ( ( losses[e] > 0.97*losses[e-1] ) and ( ( epoch - last_dropout_epoch ) > 1 ) )
         if do_update_lr :
-            #print( losses[ e-2 ] )
-            #print( losses[ e-1 ] )
-            #print( losses[e] )
-            #print( losses[e] > 0.99*losses[e-1] )
-            #print( ( delta_lr_change > 2 ) and ( losses[e] > 0.97*losses[e-2] ) )
-            exp -= 1 if ( delta_lr_change > 2 ) else 2
+            delta_lr_change      = ( epoch - last_lr_change_epoch )
+            exp                 -= 1 if ( delta_lr_change > 2 ) else 2
             last_lr_change_epoch = epoch
             update_lr( optimizer, lr=pow(2.0,exp) )
-            tee( 'learning rate => 2^' + str(exp), logfilename )
+            iu.tee( 'learning rate => 2^' + str(exp) )
 
-    # Check if end of a cycle is reached, stop if all cycles performed, restart otherwise
-    if ( exp <= -30 ) or ( train_loss < 0.0001 ):
+    #--- Increase dropout probabilities in case of overfitting
+    if ( train_loss < 0.9*dev_loss ):
+        if ( hasattr( net, 'increase_dropouts' ) ) :
+            if net.increase_dropouts() :
+                last_dropout_epoch = epoch
+
+    #--- Check if end of a cycle is reached, stop if all cycles performed, restart otherwise
+    if ( exp < -30 ) or ( dev_loss < 0.0001 ):
         if cycle == n_cycles :
             stop = True
             save = True
         else :
+            iu.tee( '-------------------' )
+            iu.tee( 'New cycle' )
             cycle          += 1
-            epoch_new_cycle = 0
+            epoch_new_cycle = epoch
             exp             = init_exp
+            if hasattr( net, 'capacity' ) and hasattr( net, 'freeze_convs' ):
+                if frozen_convs:
+                    frozen_convs = False
+                    net.freeze_convs( False )
+                elif ( net.capacity() < net.max_capacity() ):
+                    net.freeze_convs()
+                    frozen_convs = True
+                    net.increase_capacity( 1 )
+                exp = ( init_exp ) if (frozen_convs) else ( init_exp - net.capacity() - 1 )
+                iu.tee( 'capacity: ' + str(net.capacity()) + ', frozen convs: ' + str(frozen_convs) )
+            if hasattr( net, 'reset_dropouts' ):
+                net.reset_dropouts()
+            iu.tee( 'learning rate => 2^' + str(exp) )
             update_lr( optimizer, lr=pow(2.0,exp) )
-            tee( 'learning rate => 2^' + str(exp), logfilename )
 
-    # Read file to check if stop has been requested
+    #--- Read file to check if stop has been requested
     with open( 'continue.txt', 'r' ) as f :
         # XXX ^ Not robust to simultaneous read/write, those should be exceptional though
         l    = f.readline();
         stop, save = ( True, True ) if ( "1" != l ) else ( stop, save )
     f.close()
 
-    # Save parameters and neural net file
+    #--- Save parameters and neural net file
     if save:
         # TODO
         #   . https://pytorch.org/docs/stable/notes/serialization.html
         #   . save optimizer state ?
         #     -> https://discuss.pytorch.org/t/saving-and-loading-a-model-in-pytorch/2610/3
         last_save_epoch = epoch
-        torch.save( net, results_dir_name + 'gn_320x240_mse'+str(dev_loss)+'_epoch'+str(epoch)+'.pt' )
-        tee( 'save net', logfilename )
+        torch.save( net, results_dir_name + 'gn_' + 'epoch'+ str(epoch) + mse_str + '.pt' )
+        iu.tee( 'save net' )
 
     # Stop
     if stop:
         break
 
 elapsed_time = time.time() - start_time
-tee( 'Finished training in:' + str(elapsed_time), logfilename )
+iu.tee( 'Finished training in:' + str(elapsed_time) )
