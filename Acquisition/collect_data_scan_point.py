@@ -165,7 +165,9 @@ class Recorder( Thread ):
         self._cap           = cv2.VideoCapture( 0 )
         ret, frame          = self._cap.read()
         self._gray          = cv2.cvtColor( frame, cv2.COLOR_BGR2GRAY )
-        self._data_dir_name = '../Data/' + datetime.datetime.now().strftime( "%Y_%m_%d-%H_%M_%S/" )
+        self._data_dir_name = os.path.join( '..',   # XXX Not sure this works reliably on windows
+                                            'Data',
+                                            datetime.datetime.now().strftime( "%Y_%m_%d-%H_%M_%S/" ) )
         self._screen_width  = screen_width;
         self._screen_height = screen_height;
         self._margin        = margin
@@ -223,7 +225,7 @@ class Recorder( Thread ):
 
                 if is_over :
                     if ( ScannedRegion.Inner == self._region ) :
-                        self._scanner = BorderScanner( self._screen_width, self._screen_height, 10 )
+                        self._scanner = BorderScanner( self._screen_width, self._screen_height, 20 )
                         self._region  = ScannedRegion.Border
                         _, self._u, self._v = self._scanner.select_coordinates()
                     else :
@@ -244,14 +246,19 @@ class Recorder( Thread ):
 
 
     def save_data( self ):
+        # Common
         os.makedirs( name=self._data_dir_name, mode=0o775, exist_ok=True )
         self._data_counter += 1
-        with open( self._data_dir_name + '/coordinates.csv', 'a' ) as f:
+        # Coordinates
+        with open( os.path.join( self._data_dir_name, 'coordinates.csv' ), 'a' ) as f:
             u = self._u
             v = self._v
-            f.write( str( self._data_counter ) + '; ' + str( u ) + '; ' + str( v ) + '\n' )
-        f.close()
-        cv2.imwrite( self._data_dir_name + '/' + str( self._data_counter ) + '.png', self._gray )
+            f.write( str(self._data_counter) + '; ' + str(u) + '; ' + str(v) + '\n' )
+        # Image
+        h, w          = self._gray.shape
+        imgs_dir_name = os.path.join( self._data_dir_name, str(w) + 'x' + str(h) )
+        os.makedirs( imgs_dir_name, mode=0o775, exist_ok=True )
+        cv2.imwrite( os.path.join( imgs_dir_name, str(self._data_counter) + '.png' ), self._gray )
 
 
     def play( self ):
