@@ -13,7 +13,7 @@ import PyQt5.QtCore    as qtcore
 import PyQt5.QtWidgets as qtwidgets
 import PyQt5.QtGui     as qtgui
 from   PyQt5.QtCore    import QPoint  , QRect        , QSize    , Qt     , pyqtProperty , pyqtSignal
-from   PyQt5.QtWidgets import QWidget , QApplication , QLabel
+from   PyQt5.QtWidgets import QWidget , QApplication , QLabel   , QFileDialog
 from   PyQt5.QtGui     import QPixmap , QImage       , QPainter , QBrush
 import torch
 import torch.nn as nn
@@ -23,26 +23,25 @@ from   skimage import io, transform
 
 class Pointer():
 
-    _cap          = cv2.VideoCapture
-    _gray         = np.zeros(1)
-    _u            = 0;
-    _v            = 0;
-    _data_counter = 0
-    _run          = False
-    _paused       = True
-    _width        = 0
-    _height       = 0
-
-
-    def __init__( self, width, height ):
-        self._width  = width
-        self._height = height
-        self._cap  = cv2.VideoCapture( 0 )
+    def __init__( self, screen_w, screen_h, img_w, img_h, net_path ):
+        self._gray         = np.zeros(1)
+        self._u            = 0;
+        self._v            = 0;
+        self._data_counter = 0
+        self._run          = False
+        self._paused       = True
+        self._screen_w     = screen_w
+        self._screen_h     = screen_h
+        self._img_w        = img_w
+        self._img_h        = img_h
+        self._cap          = cv2.VideoCapture( 0 )
         print( 'Loading net..' )
-        self._net  = torch.load( 'gn.pt' )
+        self._net          = torch.load( net_path )
         print( '...done' )
-        self._dev  = torch.device( "cuda:0" if torch.cuda.is_available() else "cpu" )
+        self._dev          = torch.device( "cuda:0" if torch.cuda.is_available() else "cpu" )
+        print( 'Moving net to GPU..' )
         self._net.to( self._dev )
+        print( '...done' )
         Thread.__init__( self )
 
 
@@ -51,14 +50,23 @@ class Pointer():
 
 
     def run( self ):
+        # Dequeue the camera
         for ii in range( 0, 5 ):
             _, frame = self._cap.read()
+        # Acquire image
         _, frame = self._cap.read()
         gray     = cv2.cvtColor( frame, cv2.COLOR_BGR2GRAY )
-        image    = transform.resize( gray, ( 320, 240 ) )
-        image  = image.astype( float )
-        image  = np.expand_dims( image, 0 )
-        image  = np.expand_dims( image, 0 )
+        img_h, img_w = gray.shape
+        # Resize and normalize
+        if  ( img_w != self._img_w ) or ( img_h != self._img_h ) :
+            image = transform.resize( gray, ( self._img_w, self._img_h ) )
+            image = image - 0.5
+        else :
+            image = gray.astype(float)/255 - 0.5
+        # Add batch and channel dimensions
+        image = np.expand_dims( image, 0 )
+        image = np.expand_dims( image, 0 )
+        # Pass through the net
         with torch.no_grad():
             self._net.eval()
             image  = torch.from_numpy( image )
@@ -66,9 +74,9 @@ class Pointer():
             image  = image.to( self._dev )
             output = self._net( image )
             output = output.cpu().numpy()
-
-        half_width  = self._width/2
-        half_height = self._height/2
+        # Convert to screen coordinates
+        half_width  = self._screen_w/2
+        half_height = self._screen_h/2
         x = min( max( output[0][0], -1 ), 1 )
         y = min( max( output[0][1], -1 ), 1 )
         u = int( half_width*x  + half_width )
@@ -80,27 +88,22 @@ class Pointer():
 
 class Widget( QWidget ):
 
-    _image         = None
-    _pointer       = None
-    _label         = None
-    _tile_size     = 101
-    _screen_width  = 0
-    _screen_height = 0
-    _u             = 0
-    _v             = 0
-    _margin        = ( _tile_size - 1 ) / 2.0
-
-
-    def __init__( self, screen_width, screen_height ):
+    def __init__( self, screen_w, screen_h, img_w, img_h ):
         super( Widget, self ).__init__()
-        self._screen_width  = screen_width
-        self._screen_height = screen_height
-        self._image         = QImage( self._screen_width, self._screen_height, QImage.Format_RGB32 )
-        self._pointer       = Pointer( screen_width, screen_height )
-        self._label         = QLabel
-
-
-    #def __del__( self ):
+        self._image     = None
+        self._pointer   = None
+        self._label     = None
+        self._tile_size = 101
+        self._u         = 0
+        self._v         = 0
+        self._margin    = ( self._tile_size - 1 ) / 2.0
+        self._screen_w  = screen_w
+        self._screen_h  = screen_h
+        self._image     = QImage( self._screen_w, self._screen_h, QImage.Format_RGB32 )
+        net_path, _     = QFileDialog.getOpenFileName( self, 'Select net', '', 'Pytorch file (*.pt)' )
+        print( 'net path: ', net_path )
+        self._pointer   = Pointer( screen_w, screen_h, img_w, img_h, net_path )
+        self._label     = QLabel
 
 
     def set_label( self, label ):
@@ -138,7 +141,7 @@ class Widget( QWidget ):
         u = self._u
         v = self._v
 
-        if u < 0 or u > self._screen_width or v < 0 or v > self._screen_width :
+        if u < 0 or u > self._screen_w or v < 0 or v > self._screen_h :
             return
 
         color   = Qt.green
@@ -174,13 +177,15 @@ class Widget( QWidget ):
 if __name__ == '__main__':
     config = configparser.ConfigParser()
     config.read( '../config.txt' )
-    width  = int( config['SCREEN']['width'] )
-    height = int( config['SCREEN']['height'] )
+    screen_w = int( config['SCREEN']['width'] )
+    screen_h = int( config['SCREEN']['height'] )
+    img_w    = int( config['IMAGE']['width'] )
+    img_h    = int( config['IMAGE']['height'] )
 
     app   = QApplication( sys.argv )
-    w     = Widget( width, height )
+    w     = Widget( screen_w, screen_h, img_w, img_h )
     label = QLabel( w )
-    image = QImage( width, height, QImage.Format_RGB32 )
+    image = QImage( screen_w, screen_h, QImage.Format_RGB32 )
     label.setPixmap( QPixmap.fromImage( image ) )
     w.set_label( label )
     w.start()
