@@ -1,3 +1,6 @@
 [SCREEN]
-width = 1920
+width  = 1920
 height = 1080
+[IMAGE]
+width  = 640
+height = 480
