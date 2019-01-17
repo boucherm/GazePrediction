@@ -1,4 +1,4 @@
-This project is mainly an exercise but also an attempt at using a webcam to predict the mouse pointer position.
+This project is a modest exercise in pytorch, attempting to use a webcam to predict/control a mouse pointer position.
 This is ( not ) achieved ( but not that far ) using a quite simple neural net.
 As a neural net needs to be trained, training data is needed.
 This project presents three python scripts: one to acquire data, one to define and train a neural net, one to test the results.
@@ -13,7 +13,7 @@ Configuration
 
 File: `config.txt`
 
-Fill in your screen's width and height values.
+Fill in your screen's width and height values ( and maybe the desired dimensions of processed images ).
 
 
 Acquisition
@@ -35,7 +35,7 @@ It usually takes about 2mn for me.
 
 You should probably aim for at least 20 000 images ( therefore performing 30 acquisition runs ).
 Perform different acquisition runs preferably at different: times of the day, positions in front of your screen, screen height, screen inclination, etc...
-In short: try to make the training data representative of the final use cases.
+( i.e. try to make the training data representative of the use cases )
 
 Quirk: the net is prone to learn to only use the head orientation ( thus ignoring eyes ).
 To counter this, you can perform some acquisition runs while:
@@ -52,11 +52,10 @@ Training
 File: `Training/train.py`
 
 The net is defined in `Training/gaze_net.py`
-~~To retain enough details, images are downscaled only to a 320x160 resolution.~~
+~~To retain enough details, images are downscaled only to a 320x240 resolution.~~
 You can choose the size of the image you want to process.
-You'd need to adjust the convolutions parameters if you do so.
+You'd probably need to adjust the convolutions parameters if you do so.
 Processed images are quite big, therefore training is quite long.
-With an nvidia gtx970 card, training on about 40 000 images takes about 18h.
 During training the parameters are regularly saved to disk.
 Resulting files have the names: `gn_epochX_str_mseY_Z.pt`.
 In these names:
@@ -83,8 +82,7 @@ Testing
 File: `Training/test.py`
 
 To access the net architecture file the test script is in the same folder as the training one.
-It reads a "gn.pt" file.
-Therefore, you need to symlink ( or copy and rename ) the result file you want to test as `gn.pt`.
+At startup it displays a file dialog to select a saved net/weights file from the disk.
 
 The test script is very similar to the acquisition script.
 It displays a black screen.
@@ -97,5 +95,4 @@ Warning: it takes quite a long time to start.
 Adjustment to your situation:
 If you have more than one webcam connected to your computer you may need to change the camera index ( default value: `0` ) in the `cv2.VideoCapture(0)` call.
 
-**! The test script hasn't been updated and therefore is broken !**
 It shouldn't be very hard to restore, though.
