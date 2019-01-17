@@ -37,8 +37,6 @@ def update_lr( optimizer, lr ) :
 # Hyper-parameters
 init_exp = -8 # TODO: a first pass to search for a good value of init_exp
 n_cycles = 9
-w        = 320*2
-h        = 240*2
 N        = 8 # batch_size, beware, for '1' batch_norm will fail and raise an exceptijn
 
 results_dir_name = iu.setup_io()
@@ -47,7 +45,8 @@ config = configparser.ConfigParser()
 config.read( '../config.txt' )
 screen_w = int( config['SCREEN']['width'] )
 screen_h = int( config['SCREEN']['height'] )
-# TODO the same for the desired processed dimensions ?
+img_w    = int( config['IMAGE']['width'] )
+img_h    = int( config['IMAGE']['height'] )
 
 # Setting fixed seed, for debug purposes
 #torch.manual_seed(0)
@@ -59,9 +58,9 @@ iu.tee( "Preparing dataset" )
 #data_channels = dl.DataChannels.One
 #data_channels = dl.DataChannels.All
 gaze_dataset = dl.GazeDataset( "../Data",
-                               target_res=(w,h),
+                               target_res=(img_w,img_h),
                                transform=transforms.Compose( [
-                                   dl.ScaleImage( (w,h) ),
+                                   dl.ScaleImage( (img_w,img_h) ),
                                    dl.NormalizeCoordinates( (screen_w,screen_h) ),
                                    dl.CenterPixels(),
                                    dl.ToTensor() ] ) )
@@ -73,7 +72,7 @@ iu.tee( "done" )
 
 iu.tee( "Loading net" )
 #net = gn.GazeNet320x240_Strided()
-net = gn.GazeNetProgressive( w, h,
+net = gn.GazeNetProgressive( img_w, img_h,
                              [ gn.CP(7,2,64),
                                gn.CP(7,2,16),
                                gn.CP(7,2,16),
@@ -81,9 +80,9 @@ net = gn.GazeNetProgressive( w, h,
                                gn.CP(5,1,16),
                                gn.CP(5,1,16) ],
                              [ gn.FCP( gn.AOR.Abs, 512 ),
-                               gn.FCP( gn.AOR.Abs, 256 ),
-                               gn.FCP( gn.AOR.Abs, 256 ),
-                               gn.FCP( gn.AOR.Abs, 256 ),
+                               gn.FCP( gn.AOR.Abs, 512 ),
+                               gn.FCP( gn.AOR.Abs, 512 ),
+                               gn.FCP( gn.AOR.Abs, 512 ),
                                gn.FCP( gn.AOR.Abs, 2 ) ],
                              #True, N
                              False, N
@@ -236,13 +235,13 @@ while True:
         save          = True
         best_dev_loss = dev_loss
         frac, inte    = math.modf( dev_loss )
-        mse_str       = '_dev' + '_mse' + str(int(inte)) + '_' + str( math.floor( 10000*frac ) )
+        mse_str       = '_dev' + '_mse' + str(int(inte)) + '_' + str(frac)[2:6]
 
     if ( train_loss < 0.8*best_train_loss ): # otherwise we'll be saving way too often
         save            = True
         best_train_loss = train_loss
         frac, inte      = math.modf( train_loss )
-        mse_str         = '_train' + '_mse' + str(int(inte)) + '_' + str( math.floor( 10000*frac ) )
+        mse_str         = '_train' + '_mse' + str(int(inte)) + '_' + str(frac)[2:6]
 
     #--- Check if lr reduction is needed, perform if so
     e = epoch - 1
