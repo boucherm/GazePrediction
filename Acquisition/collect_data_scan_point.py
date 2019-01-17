@@ -225,7 +225,7 @@ class Recorder( Thread ):
 
                 if is_over :
                     if ( ScannedRegion.Inner == self._region ) :
-                        self._scanner = BorderScanner( self._screen_width, self._screen_height, 20 )
+                        self._scanner = BorderScanner( self._screen_width, self._screen_height, 10 )
                         self._region  = ScannedRegion.Border
                         _, self._u, self._v = self._scanner.select_coordinates()
                     else :
