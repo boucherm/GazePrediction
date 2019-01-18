@@ -94,5 +94,3 @@ Warning: it takes quite a long time to start.
 
 Adjustment to your situation:
 If you have more than one webcam connected to your computer you may need to change the camera index ( default value: `0` ) in the `cv2.VideoCapture(0)` call.
-
-It shouldn't be very hard to restore, though.
